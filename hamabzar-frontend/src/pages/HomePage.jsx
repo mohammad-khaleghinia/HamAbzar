@@ -17,8 +17,12 @@ export default function HomePage() {
   const [searchInput, setSearchInput] = useState("");
   const debouncedSearch = useDebouncedValue(searchInput, 350);
 
-  const [categories, setCategories] = useState([]);
-  const [cities, setCities] = useState([]);
+  const cats = await fetchCategories();
+  setCategories(Array.isArray(cats) ? cats : []);
+
+  const cities = await fetchCities();
+  setCities(Array.isArray(cities) ? cities : []);
+  
   const [activeToggleFilters, setActiveToggleFilters] = useState({});
   const [hoveredToolId, setHoveredToolId] = useState(null);
 

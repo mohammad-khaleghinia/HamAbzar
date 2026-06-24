@@ -222,12 +222,14 @@ export async function uploadToolImage(id, formData) {
 
 /** GET /api/categories/ */
 export async function fetchCategories() {
-  return request('/tools/categories/');
+  const res = await request('/tools/categories/');
+  return Array.isArray(res) ? res : (res?.data ?? []);
 }
 
 /** GET /api/cities/ */
 export async function fetchCities() {
-  return request('/tools/cities/');
+  const res = await request('/tools/cities/');
+  return Array.isArray(res) ? res : (res?.data ?? []);
 }
 
 // ============================================================
