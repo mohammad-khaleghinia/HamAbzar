@@ -1,210 +1,338 @@
-// ─────────────────────────────────────────────────────────────
-// api.js — لایه‌ی یکپارچه دسترسی به داده
-//
-// قانون مهم: هیچ کامپوننتی مستقیم از mockData.js ایمپورت نمی‌کنه.
-// همه از طریق توابع همین فایل به داده دسترسی پیدا می‌کنن.
-// وقتی بک‌اند Rental API و Tools API آماده شد، فقط بدنه‌ی هر
-// تابع اینجا با فراخوانی axiosClient عوض می‌شه — امضای تابع
-// (پارامترها و شکل خروجی) ثابت می‌مونه، پس کامپوننت‌ها دست
-// نمی‌خورن.
-// ─────────────────────────────────────────────────────────────
+const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000/api';
 
-import {
-  mockTools,
-  mockCategories,
-  mockCities,
-  mockToolDetail,
-  mockAvailability,
-  mockToolReviews,
-  mockRelatedTools,
-  mockMyRentals,
-  mockMyToolRentals,
-  mockConversations,
-  mockConversationMessages,
-  mockReviewTags,
-} from "./mockData";
-
-// شبیه‌سازی تأخیر شبکه‌ی واقعی تا لودینگ/اسکلتون‌ها قابل تست باشن
-const NETWORK_DELAY_MS = 450;
-const delay = (ms = NETWORK_DELAY_MS) => new Promise((resolve) => setTimeout(resolve, ms));
-
-/**
- * مرکز تقریبی شهرها برای محاسبه موقعیت روی نقشه.
- * ⚠️ موقتی: mockData.js فعلاً lat/lng برای هر ابزار نداره.
- * وقتی بک‌اند فیلدهای latitude/longitude رو به مدل Tool اضافه کرد،
- * این بخش و تابع deriveCoordinates حذف می‌شن و کوردینیت مستقیم
- * از روی response خونده می‌شه.
- */
-const CITY_CENTERS = {
-  1: { lat: 35.6892, lng: 51.389 }, // تهران
-  2: { lat: 32.6546, lng: 51.668 }, // اصفهان
-  3: { lat: 36.2972, lng: 59.6067 }, // مشهد
-  4: { lat: 29.5918, lng: 52.5837 }, // شیراز
-  5: { lat: 38.0962, lng: 46.2738 }, // تبریز
-};
-
-/** ساخت کوردینیت تقریبی بر اساس مرکز شهر + distance_km + offset مبتنی بر id (برای پراکندگی پایدار) */
-function deriveCoordinates(tool) {
-  const center = CITY_CENTERS[tool.city?.id] || CITY_CENTERS[1];
-  const angle = (tool.id * 47) % 360; // زاویه‌ی پایدار و قابل تکرار برای هر ابزار
-  const radiusDeg = (tool.distance_km || 1) * 0.009; // تقریب: ۱ کیلومتر ≈ ۰.۰۰۹ درجه
-  const rad = (angle * Math.PI) / 180;
-  return {
-    lat: center.lat + radiusDeg * Math.cos(rad),
-    lng: center.lng + radiusDeg * Math.sin(rad),
-  };
+/** کلاس خطای یکپارچه برای تشخیص نوع خطا در UI */
+export class ApiError extends Error {
+  constructor(type, message, status = null) {
+    super(message);
+    this.type = type;
+    this.status = status;
+  }
 }
 
 /**
- * GET /api/tools/
- * @param {Object} params - { category_id, city_id, search, min_price, max_price, ordering, page }
- * @returns {Promise<{count:number, next:string|null, previous:string|null, results:Array}>}
+ * هلپر برای درخواست‌های HTTP با مدیریت خطا
+ */
+async function request(endpoint, options = {}) {
+  const url = `${API_BASE_URL}${endpoint}`;
+  
+  const config = {
+    headers: {
+      'Content-Type': 'application/json',
+      ...options.headers,
+    },
+    ...options,
+  };
+
+  // اضافه کردن توکن اگر موجود باشد
+  const token = localStorage.getItem('access_token');
+  if (token) {
+    config.headers['Authorization'] = `Bearer ${token}`;
+  }
+
+  try {
+    const response = await fetch(url, config);
+    
+    // اگر 401 بود، توکن منقضی شده
+    if (response.status === 401) {
+      // تلاش برای refresh token
+      const refreshed = await refreshAccessToken();
+      if (refreshed) {
+        // تلاش مجدد با توکن جدید
+        config.headers['Authorization'] = `Bearer ${localStorage.getItem('access_token')}`;
+        const retryResponse = await fetch(url, config);
+        if (!retryResponse.ok) {
+          throw await handleErrorResponse(retryResponse);
+        }
+        return retryResponse.status === 204 ? null : await retryResponse.json();
+      } else {
+        // logout کاربر
+        localStorage.removeItem('access_token');
+        localStorage.removeItem('refresh_token');
+        throw new ApiError('unauthorized', 'لطفاً دوباره وارد شوید.', 401);
+      }
+    }
+
+    if (!response.ok) {
+      throw await handleErrorResponse(response);
+    }
+
+    // اگر 204 No Content بود
+    if (response.status === 204) {
+      return null;
+    }
+
+    return await response.json();
+  } catch (error) {
+    if (error instanceof ApiError) {
+      throw error;
+    }
+    // خطای شبکه
+    throw new ApiError('network_error', 'خطا در اتصال به سرور. لطفاً اتصال اینترنت خود را بررسی کنید.');
+  }
+}
+
+/**
+ * مدیریت پاسخ‌های خطا از سرور
+ */
+async function handleErrorResponse(response) {
+  let errorData;
+  try {
+    errorData = await response.json();
+  } catch {
+    errorData = { detail: 'خطای سرور' };
+  }
+
+  const message = errorData.detail || errorData.message || 'خطایی رخ داده است';
+  
+  // تشخیص نوع خطا بر اساس status code
+  let type = 'server_error';
+  if (response.status === 400) type = 'validation_error';
+  if (response.status === 401) type = 'unauthorized';
+  if (response.status === 403) type = 'forbidden';
+  if (response.status === 404) type = 'not_found';
+  
+  return new ApiError(type, message, response.status);
+}
+
+/**
+ * تمدید توکن دسترسی با refresh token
+ */
+async function refreshAccessToken() {
+  const refreshToken = localStorage.getItem('refresh_token');
+  if (!refreshToken) return false;
+
+  try {
+    const response = await fetch(`${API_BASE_URL}/auth/token/refresh/`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ refresh: refreshToken }),
+    });
+
+    if (!response.ok) return false;
+
+    const data = await response.json();
+    localStorage.setItem('access_token', data.access);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+// ============================================================
+// TOOLS API
+// ============================================================
+
+/**
+ * GET /api/tools/?category_id=...&city_id=...&search=...&only_available=...&ordering=...
+ * @param {Object} params - { category_id, city_id, search, only_available, ordering }
  */
 export async function fetchTools(params = {}) {
-  await delay();
-
-  let results = [...mockTools.results];
-
-  if (params.category_id) {
-    results = results.filter((t) => t.category.id === Number(params.category_id));
-  }
-  if (params.city_id) {
-    results = results.filter((t) => t.city.id === Number(params.city_id));
-  }
-  if (params.search) {
-    const q = params.search.trim().toLowerCase();
-    results = results.filter((t) => t.name.toLowerCase().includes(q));
-  }
-  if (params.only_available) {
-    results = results.filter((t) => t.is_available);
-  }
-
-  switch (params.ordering) {
-    case "price_asc":
-      results.sort((a, b) => a.daily_price - b.daily_price);
-      break;
-    case "price_desc":
-      results.sort((a, b) => b.daily_price - a.daily_price);
-      break;
-    case "rating":
-      results.sort((a, b) => b.owner.rating - a.owner.rating);
-      break;
-    case "distance":
-      results.sort((a, b) => a.distance_km - b.distance_km);
-      break;
-    default:
-      break; // جدیدترین: همون ترتیب پیش‌فرض mock
-  }
-
-  // اضافه کردن کوردینیت موقت برای نقشه (توضیح بالا)
-  results = results.map((t) => ({ ...t, coordinates: deriveCoordinates(t) }));
-
-  return {
-    count: results.length,
-    next: null,
-    previous: null,
-    results,
-  };
+  const queryParams = new URLSearchParams();
+  
+  if (params.category_id) queryParams.append('category_id', params.category_id);
+  if (params.city_id) queryParams.append('city_id', params.city_id);
+  if (params.search) queryParams.append('search', params.search);
+  if (params.only_available) queryParams.append('only_available', 'true');
+  if (params.ordering) queryParams.append('ordering', params.ordering);
+  
+  const query = queryParams.toString();
+  return request(`/tools/${query ? '?' + query : ''}`);
 }
 
 /**
- * GET /api/tools/<id>/
- * @param {number} id
+ * GET /api/tools/:id/
  */
 export async function fetchToolDetail(id) {
-  await delay();
-  if (Number(id) !== mockToolDetail.data.id) {
-    throw new ApiError("not_found", "مورد مورد نظر یافت نشد.");
-  }
-  return mockToolDetail.data;
+  return request(`/tools/${id}/`);
 }
 
 /**
- * GET /api/tools/<id>/availability/?month=YYYY-MM
- * @param {number} id
- * @param {string} month
+ * GET /api/tools/:id/availability/?month=YYYY-MM
  */
 export async function fetchToolAvailability(id, month) {
-  await delay(250);
-  return mockAvailability.data;
+  return request(`/tools/${id}/availability/?month=${month}`);
 }
+
+/**
+ * GET /api/tools/:id/reviews/
+ */
+export async function fetchToolReviews(id) {
+  return request(`/tools/${id}/reviews/`);
+}
+
+/**
+ * GET /api/tools/:id/related/
+ */
+export async function fetchRelatedTools(id) {
+  return request(`/tools/${id}/related/`);
+}
+
+/**
+ * POST /api/tools/
+ */
+export async function createTool(toolData) {
+  return request('/tools/', {
+    method: 'POST',
+    body: JSON.stringify(toolData),
+  });
+}
+
+/**
+ * PATCH /api/tools/:id/
+ */
+export async function updateTool(id, toolData) {
+  return request(`/tools/${id}/`, {
+    method: 'PATCH',
+    body: JSON.stringify(toolData),
+  });
+}
+
+/**
+ * DELETE /api/tools/:id/
+ */
+export async function deleteTool(id) {
+  return request(`/tools/${id}/`, {
+    method: 'DELETE',
+  });
+}
+
+/**
+ * POST /api/tools/:id/images/
+ */
+export async function uploadToolImage(id, formData) {
+  const token = localStorage.getItem('access_token');
+  const response = await fetch(`${API_BASE_URL}/tools/${id}/images/`, {
+    method: 'POST',
+    headers: {
+      'Authorization': `Bearer ${token}`,
+    },
+    body: formData, // FormData به صورت خودکار Content-Type را تنظیم می‌کند
+  });
+
+  if (!response.ok) {
+    throw await handleErrorResponse(response);
+  }
+
+  return response.json();
+}
+
+// ============================================================
+// LOOKUP APIs
+// ============================================================
 
 /** GET /api/categories/ */
 export async function fetchCategories() {
-  await delay(200);
-  return mockCategories;
+  return request('/tools/categories/');
 }
 
 /** GET /api/cities/ */
 export async function fetchCities() {
-  await delay(200);
-  return mockCities;
+  return request('/tools/cities/');
 }
 
-/**
- * GET /api/tools/<id>/reviews/
- * @param {number} id
- */
-export async function fetchToolReviews(id) {
-  await delay(300);
-  return mockToolReviews.data;
-}
-
-/**
- * GET /api/tools/<id>/related/
- * @param {number} id
- */
-export async function fetchRelatedTools(id) {
-  await delay(300);
-  return mockRelatedTools.data;
-}
+// ============================================================
+// AUTHENTICATION
+// ============================================================
 
 /**
  * POST /api/auth/request-otp/
- * در محیط توسعه واقعی، کد OTP در ترمینال بک‌اند چاپ می‌شه (طبق README).
- * اینجا هم همون رفتار رو با کنسول مرورگر شبیه‌سازی می‌کنیم.
+ * @param {string} phone - شماره تلفن 10 رقمی (بدون 0)
  */
 export async function requestOtp(phone) {
-  await delay(500);
-  if (!/^9\d{9}$/.test(phone)) {
-    throw new ApiError("bad_request", "شماره موبایل معتبر نیست.");
-  }
-  const fakeCode = "7283"; // ⚠️ موقتی — تا وقتی auth واقعی وصل شه همین کد رو هرجا قبول می‌کنیم
-  console.log(`[mock OTP] کد ارسال‌شده به 0${phone}: ${fakeCode}`);
-  return { status: "success" };
+  return request('/auth/request-otp/', {
+    method: 'POST',
+    body: JSON.stringify({ phone }),
+  });
 }
 
 /**
  * POST /api/auth/verify-otp/
- * فعلاً هر کد ۴ رقمی رو قبول می‌کند، به‌جز "0000" که عمداً برای تست
- * state خطا رد می‌شود.
+ * @param {string} phone
+ * @param {string} code - کد 4 رقمی
  */
 export async function verifyOtp(phone, code) {
-  await delay(500);
-  if (code === "0000") {
-    throw new ApiError("bad_request", "کد وارد شده صحیح نیست");
+  const data = await request('/auth/verify-otp/', {
+    method: 'POST',
+    body: JSON.stringify({ phone, code }),
+  });
+
+  // ذخیره توکن‌ها
+  if (data.access_token) {
+    localStorage.setItem('access_token', data.access_token);
   }
-  if (code.length !== 4) {
-    throw new ApiError("bad_request", "کد تأیید باید ۴ رقم باشد.");
+  if (data.refresh_token) {
+    localStorage.setItem('refresh_token', data.refresh_token);
   }
-  return {
-    access_token: "mock-access-token",
-    refresh_token: "mock-refresh-token",
-    user: { id: 101, phone, full_name: "علی رضایی" },
-  };
+
+  return data;
 }
 
 /**
+ * POST /api/auth/register/
+ */
+export async function register(userData) {
+  const data = await request('/auth/register/', {
+    method: 'POST',
+    body: JSON.stringify(userData),
+  });
+
+  // ذخیره توکن‌ها
+  if (data.access_token) {
+    localStorage.setItem('access_token', data.access_token);
+  }
+  if (data.refresh_token) {
+    localStorage.setItem('refresh_token', data.refresh_token);
+  }
+
+  return data;
+}
+
+/**
+ * POST /api/auth/login/
+ */
+export async function login(phone, password) {
+  const data = await request('/auth/login/', {
+    method: 'POST',
+    body: JSON.stringify({ phone, password }),
+  });
+
+  // ذخیره توکن‌ها
+  if (data.access_token) {
+    localStorage.setItem('access_token', data.access_token);
+  }
+  if (data.refresh_token) {
+    localStorage.setItem('refresh_token', data.refresh_token);
+  }
+
+  return data;
+}
+
+/**
+ * GET /api/auth/me/
+ */
+export async function fetchCurrentUser() {
+  return request('/auth/me/');
+}
+
+/**
+ * خروج کاربر (فقط local)
+ */
+export function logout() {
+  localStorage.removeItem('access_token');
+  localStorage.removeItem('refresh_token');
+}
+
+// ============================================================
+// RENTALS
+// ============================================================
+
+/**
  * GET /api/rentals/my/?status=...
- * @param {string|null} statusFilter - یکی از RENTAL_STATUS_LABELS یا null برای همه
+ * @param {string|null} statusFilter - pending | active | completed | cancelled
  */
 export async function fetchMyRentals(statusFilter = null) {
-  await delay(350);
-  let results = [...mockMyRentals.data];
-  if (statusFilter) {
-    results = results.filter((r) => r.status === statusFilter);
-  }
-  return results;
+  const query = statusFilter ? `?status=${statusFilter}` : '';
+  return request(`/rentals/my/${query}`);
 }
 
 /**
@@ -212,55 +340,106 @@ export async function fetchMyRentals(statusFilter = null) {
  * @param {string|null} statusFilter
  */
 export async function fetchMyToolRentals(statusFilter = null) {
-  await delay(350);
-  let results = [...mockMyToolRentals.data];
-  if (statusFilter) {
-    results = results.filter((r) => r.status === statusFilter);
-  }
-  return results;
-}
-
-/** GET /api/chat/conversations/ */
-export async function fetchConversations() {
-  await delay(300);
-  return mockConversations.data;
+  const query = statusFilter ? `?status=${statusFilter}` : '';
+  return request(`/rentals/my-tools/${query}`);
 }
 
 /**
- * GET /api/chat/conversations/<id>/messages/
- * ⚠️ موقتی: mock فقط برای گفتگوی id=1 پیام واقعی دارد (همان دیتاست کامل
- * نمونه با انواع پیام). برای بقیه‌ی گفتگوها یک پیام عمومی برگردانده می‌شود
- * تا UI نشکند، چون mock فعلی محتوای کامل برای همه‌ی گفتگوها ندارد.
+ * POST /api/rentals/
+ */
+export async function createRental(rentalData) {
+  return request('/rentals/', {
+    method: 'POST',
+    body: JSON.stringify(rentalData),
+  });
+}
+
+// ============================================================
+// DISPUTES
+// ============================================================
+
+/**
+ * GET /api/disputes/
+ */
+export async function fetchDisputes() {
+  return request('/disputes/');
+}
+
+/**
+ * POST /api/rentals/:rental_id/dispute/
+ */
+export async function createDispute(rentalId, disputeData) {
+  return request(`/rentals/${rentalId}/dispute/`, {
+    method: 'POST',
+    body: JSON.stringify(disputeData),
+  });
+}
+
+/**
+ * POST /api/disputes/:dispute_id/resolve/
+ */
+export async function resolveDispute(disputeId, resolutionData) {
+  return request(`/disputes/${disputeId}/resolve/`, {
+    method: 'POST',
+    body: JSON.stringify(resolutionData),
+  });
+}
+
+// ============================================================
+// CHAT (endpoints تخمینی - نیاز به تایید از chat/urls.py)
+// ============================================================
+
+/**
+ * GET /api/chat/conversations/
+ */
+export async function fetchConversations() {
+  return request('/chat/conversations/');
+}
+
+/**
+ * GET /api/chat/conversations/:id/messages/
  */
 export async function fetchConversationMessages(conversationId) {
-  await delay(300);
-  if (Number(conversationId) === 1) {
-    return mockConversationMessages.data;
-  }
-  return { rental_context: null, messages: [] };
-}
-
-/** GET /api/reviews/tags/ */
-export async function fetchReviewTags() {
-  await delay(200);
-  return mockReviewTags;
+  return request(`/chat/conversations/${conversationId}/messages/`);
 }
 
 /**
- * POST /api/rentals/<rental_id>/review/
+ * POST /api/chat/conversations/:id/messages/
+ */
+export async function sendMessage(conversationId, messageData) {
+  return request(`/chat/conversations/${conversationId}/messages/`, {
+    method: 'POST',
+    body: JSON.stringify(messageData),
+  });
+}
+
+// ============================================================
+// REVIEWS (endpoints تخمینی - نیاز به تایید)
+// ============================================================
+
+/**
+ * GET /api/reviews/tags/
+ */
+export async function fetchReviewTags() {
+  return request('/reviews/tags/');
+}
+
+/**
+ * POST /api/rentals/:rental_id/review/
  * @param {number} rentalId
  * @param {Object} payload - { overall_rating, criteria, tags, comment, photos, is_public }
  */
 export async function submitReview(rentalId, payload) {
-  await delay(500);
-  console.log(`[mock] ثبت نظر برای رزرو ${rentalId}:`, payload);
-  return { status: "success" };
+  return request(`/rentals/${rentalId}/review/`, {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  });
 }
 
-/** کلاس خطای یکپارچه برای تشخیص نوع خطا در UI (مطابق mockErrors در mockData.js) */
-export class ApiError extends Error {
-  constructor(type, message) {
-    super(message);
-    this.type = type;
-  }
+// ============================================================
+// HELPER: check if user is authenticated
+// ============================================================
+
+export function isAuthenticated() {
+  return !!localStorage.getItem('access_token');
 }

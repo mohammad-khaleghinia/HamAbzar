@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useTools } from "../hooks/useTools";
 import { useDebouncedValue } from "../hooks/useDebouncedValue";
-import { fetchCategories } from "../services/api";
+import { fetchCategories, fetchCities } from '../services/api';
 
 import Header from "../components/layout/Header";
 import FilterBar from "../components/layout/FilterBar";
@@ -18,12 +18,19 @@ export default function HomePage() {
   const debouncedSearch = useDebouncedValue(searchInput, 350);
 
   const [categories, setCategories] = useState([]);
+  const [cities, setCities] = useState([]);
   const [activeToggleFilters, setActiveToggleFilters] = useState({});
   const [hoveredToolId, setHoveredToolId] = useState(null);
 
   // بارگذاری دسته‌بندی‌ها یک‌بار در ابتدای صفحه
   useEffect(() => {
-    fetchCategories().then(setCategories);
+  fetchCategories().then(response => {
+      setCategories(response?.data || []);
+    });
+    
+    fetchCities().then(response => {
+      setCities(response?.data || []);
+    });
   }, []);
 
   // اعمال جستجوی دیبانس‌شده روی فیلتر اصلی
