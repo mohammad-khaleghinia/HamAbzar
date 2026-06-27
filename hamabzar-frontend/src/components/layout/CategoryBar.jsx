@@ -1,14 +1,4 @@
-// آیکون هر دسته‌بندی بر اساس id — چون mockCategories فقط id/name داره و آیکون نداره
-const CATEGORY_ICONS = {
-  1: "fa-solid fa-bolt", // دریل و فرز
-  2: "fa-solid fa-stairs", // نردبان (fallback اگر نبود: ladder)
-  3: "fa-solid fa-seedling", // باغبانی
-  4: "fa-solid fa-fire", // جوشکاری
-  5: "fa-solid fa-soap", // نظافت و شستشو
-  6: "fa-solid fa-hammer", // نجاری
-  7: "fa-solid fa-paint-roller", // رنگ‌کاری
-  8: "fa-solid fa-ruler-combined", // اندازه‌گیری
-};
+import { CATEGORY_ICONS, DEFAULT_CATEGORY_ICON } from "../../utils/categoryIcons";
 
 export default function CategoryBar({ categories, activeCategoryId, onSelect }) {
   return (
@@ -35,7 +25,7 @@ export default function CategoryBar({ categories, activeCategoryId, onSelect }) 
               : "border-gray-100 bg-white text-gray-500 hover:border-primary-100 hover:text-primary-600"
           }`}
         >
-          <i className={`${CATEGORY_ICONS[cat.id] || "fa-solid fa-toolbox"} text-[20px]`} />
+          <i className={`${CATEGORY_ICONS[cat.id] || DEFAULT_CATEGORY_ICON} text-[20px]`} />
           {cat.name}
         </button>
       ))}

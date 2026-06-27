@@ -559,6 +559,137 @@ export const mockToolReviews = {
   },
 };
 
+// ─── وضعیت‌های ممکن برای کیفیت ظاهری ابزار (فرم ثبت ابزار) ───
+// ⚠️ این بخش قبلاً وجود نداشت.
+export const TOOL_CONDITIONS = [
+  "نو / کارکرده ندیده",
+  "در حد نو",
+  "کارکرده — سالم",
+  "کارکرده — نیاز به دقت",
+];
+
+// ─── صف مدیریت ابزارها برای ادمین (GET /api/admin/tools/) ───
+// ⚠️ این بخش قبلاً وجود نداشت. متفاوت از mockTools (که فقط ابزارهای
+// *موجود برای کرایه* را نشان می‌دهد)؛ این لیست همه‌ی ابزارهای سیستم
+// را با وضعیت بررسی ادمین (pending/approved/rejected) نشان می‌دهد.
+export const mockAdminToolsQueue = [
+  {
+    id: 101,
+    name: "فرز آنگولر بوش",
+    category: { id: 1, name: "دریل و فرز" },
+    owner: { id: 107, full_name: "رضا فرهادی" },
+    daily_price: 40000,
+    submitted_at: "2026-06-20T09:00:00+03:30",
+    review_status: "pending",
+    thumbnail: null,
+  },
+  {
+    id: 102,
+    name: "چمن‌زن هوندا HRG416",
+    category: { id: 3, name: "باغبانی" },
+    owner: { id: 106, full_name: "مریم کریمی" },
+    daily_price: 85000,
+    submitted_at: "2026-06-19T14:00:00+03:30",
+    review_status: "pending",
+    thumbnail: null,
+  },
+  {
+    id: 1,
+    name: "دریل بوش ۱۳ میل",
+    category: { id: 1, name: "دریل و فرز" },
+    owner: { id: 102, full_name: "مریم احمدی" },
+    daily_price: 80000,
+    submitted_at: "2026-05-10T08:00:00+03:30",
+    review_status: "approved",
+    thumbnail: null,
+  },
+  {
+    id: 2,
+    name: "نردبان آلومینیومی ۶ متری",
+    category: { id: 2, name: "نردبان" },
+    owner: { id: 103, full_name: "حسن موسوی" },
+    daily_price: 60000,
+    submitted_at: "2026-05-08T08:00:00+03:30",
+    review_status: "approved",
+    thumbnail: null,
+  },
+  {
+    id: 4,
+    name: "دستگاه جوش اینورتر ۲۰۰ آمپر",
+    category: { id: 4, name: "جوشکاری" },
+    owner: { id: 105, full_name: "سارا محمدی" },
+    daily_price: 150000,
+    submitted_at: "2026-05-01T08:00:00+03:30",
+    review_status: "approved",
+    thumbnail: null,
+  },
+  {
+    id: 103,
+    name: "پیستوله رنگ‌پاش بی‌کیفیت",
+    category: { id: 7, name: "رنگ‌کاری" },
+    owner: { id: 110, full_name: "علی محمدی" },
+    daily_price: 20000,
+    submitted_at: "2026-06-15T11:00:00+03:30",
+    review_status: "rejected",
+    rejection_reason: "تصاویر کافی نیست و توضیحات ناقص است",
+    thumbnail: null,
+  },
+];
+
+// ─── KPI های داشبورد ادمین (GET /api/admin/dashboard/) ──────
+// ⚠️ این بخش قبلاً وجود نداشت. اعداد صرفاً نمایشی‌اند و با حجم
+// واقعی mockTools/mockCurrentUser هم‌خوان نیستند — در API واقعی
+// این مقادیر از شمارش سراسری دیتابیس می‌آیند، نه از این mock محدود.
+export const mockAdminKpis = {
+  active_tools: { value: 12480, trend_percent: 12, trend_direction: "up" },
+  active_users: { value: 8210, trend_percent: 8, trend_direction: "up" },
+  monthly_rentals: { value: 2940, trend_percent: 23, trend_direction: "up" },
+  open_reports: { value: 14, trend_percent: 5, trend_direction: "down" },
+};
+
+// ─── روند رزروهای ۷ روز اخیر برای نمودار میله‌ای ─────────────
+export const mockRentalTrend = [
+  { label: "شنبه", height_percent: 58 },
+  { label: "یکشنبه", height_percent: 72 },
+  { label: "دوشنبه", height_percent: 45 },
+  { label: "سه‌شنبه", height_percent: 80 },
+  { label: "چهارشنبه", height_percent: 100 },
+  { label: "پنجشنبه", height_percent: 64 },
+  { label: "جمعه", height_percent: 38 },
+];
+
+// ─── موارد در انتظار بررسی ادمین ──────────────────────────────
+export const mockPendingApprovals = [
+  {
+    id: 1,
+    type: "new_listing",
+    icon: "fa-solid fa-toolbox",
+    title: "آگهی جدید: فرز آنگولر بوش",
+    subtitle: "توسط رضا فرهادی",
+  },
+  {
+    id: 2,
+    type: "report",
+    icon: "fa-solid fa-flag",
+    title: "گزارش تخلف کاربر",
+    subtitle: "علیه: کاربر #۴۴۲۱",
+  },
+  {
+    id: 3,
+    type: "listing_edit",
+    icon: "fa-solid fa-toolbox",
+    title: "ویرایش آگهی: چمن‌زن هوندا",
+    subtitle: "توسط مریم کریمی",
+  },
+  {
+    id: 4,
+    type: "support_ticket",
+    icon: "fa-solid fa-headset",
+    title: "تیکت پشتیبانی جدید",
+    subtitle: "مشکل در بازگشت ودیعه",
+  },
+];
+
 // ─── تگ‌های سریع برای فرم ثبت نظر (GET /api/reviews/tags/) ───
 // ⚠️ این بخش قبلاً وجود نداشت؛ برای فرم ثبت نظر اضافه شده.
 export const mockReviewTags = [

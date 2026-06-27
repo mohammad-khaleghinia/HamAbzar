@@ -55,10 +55,13 @@ export default function Header({ searchValue, onSearchChange }) {
           <i className="fa-regular fa-user" />
           <span className="hidden sm:inline">ورود / ثبت‌نام</span>
         </Link>
-        <button className="flex items-center gap-2 rounded-md bg-primary-600 px-3 py-1.5 text-sm font-medium text-white transition hover:bg-primary-700">
+        <Link
+          to="/tools/new"
+          className="flex items-center gap-2 rounded-md bg-primary-600 px-3 py-1.5 text-sm font-medium text-white transition hover:bg-primary-700"
+        >
           <i className="fa-solid fa-plus" />
           ثبت ابزار
-        </button>
+        </Link>
       </div>
     </header>
   );
