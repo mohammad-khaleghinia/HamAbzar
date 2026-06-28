@@ -1,344 +1,249 @@
-// ─────────────────────────────────────────────────────────────
-// api.js — لایه‌ی یکپارچه دسترسی به داده
-//
-// قانون مهم: هیچ کامپوننتی مستقیم از mockData.js ایمپورت نمی‌کنه.
-// همه از طریق توابع همین فایل به داده دسترسی پیدا می‌کنن.
-// وقتی بک‌اند Rental API و Tools API آماده شد، فقط بدنه‌ی هر
-// تابع اینجا با فراخوانی axiosClient عوض می‌شه — امضای تابع
-// (پارامترها و شکل خروجی) ثابت می‌مونه، پس کامپوننت‌ها دست
-// نمی‌خورن.
-// ─────────────────────────────────────────────────────────────
+import axiosClient from "./axiosClient";
 
-import {
-  mockTools,
-  mockCategories,
-  mockCities,
-  mockToolDetail,
-  mockAvailability,
-  mockToolReviews,
-  mockRelatedTools,
-  mockMyRentals,
-  mockMyToolRentals,
-  mockConversations,
-  mockConversationMessages,
-  mockReviewTags,
-  TOOL_CONDITIONS,
-  mockAdminKpis,
-  mockRentalTrend,
-  mockPendingApprovals,
-  mockAdminToolsQueue,
-} from "./mockData";
+const getData = (response) => response.data;
 
-// شبیه‌سازی تأخیر شبکه‌ی واقعی تا لودینگ/اسکلتون‌ها قابل تست باشن
-const NETWORK_DELAY_MS = 450;
-const delay = (ms = NETWORK_DELAY_MS) => new Promise((resolve) => setTimeout(resolve, ms));
+const saveAuthTokens = (data) => {
+  const accessToken = data.access || data.access_token;
+  const refreshToken = data.refresh || data.refresh_token;
 
-/**
- * مرکز تقریبی شهرها برای محاسبه موقعیت روی نقشه.
- * ⚠️ موقتی: mockData.js فعلاً lat/lng برای هر ابزار نداره.
- * وقتی بک‌اند فیلدهای latitude/longitude رو به مدل Tool اضافه کرد،
- * این بخش و تابع deriveCoordinates حذف می‌شن و کوردینیت مستقیم
- * از روی response خونده می‌شه.
- */
-const CITY_CENTERS = {
-  1: { lat: 35.6892, lng: 51.389 }, // تهران
-  2: { lat: 32.6546, lng: 51.668 }, // اصفهان
-  3: { lat: 36.2972, lng: 59.6067 }, // مشهد
-  4: { lat: 29.5918, lng: 52.5837 }, // شیراز
-  5: { lat: 38.0962, lng: 46.2738 }, // تبریز
+  if (accessToken) {
+    localStorage.setItem("access_token", accessToken);
+  }
+
+  if (refreshToken) {
+    localStorage.setItem("refresh_token", refreshToken);
+  }
 };
 
-/** ساخت کوردینیت تقریبی بر اساس مرکز شهر + distance_km + offset مبتنی بر id (برای پراکندگی پایدار) */
-function deriveCoordinates(tool) {
-  const center = CITY_CENTERS[tool.city?.id] || CITY_CENTERS[1];
-  const angle = (tool.id * 47) % 360; // زاویه‌ی پایدار و قابل تکرار برای هر ابزار
-  const radiusDeg = (tool.distance_km || 1) * 0.009; // تقریب: ۱ کیلومتر ≈ ۰.۰۰۹ درجه
-  const rad = (angle * Math.PI) / 180;
-  return {
-    lat: center.lat + radiusDeg * Math.cos(rad),
-    lng: center.lng + radiusDeg * Math.sin(rad),
-  };
-}
+const removeEmptyParams = (params = {}) =>
+  Object.fromEntries(
+    Object.entries(params).filter(([, value]) => value !== undefined && value !== null && value !== "")
+  );
 
-/**
- * GET /api/tools/
- * @param {Object} params - { category_id, city_id, search, min_price, max_price, ordering, page }
- * @returns {Promise<{count:number, next:string|null, previous:string|null, results:Array}>}
- */
-export async function fetchTools(params = {}) {
-  await delay();
+export const requestOtp = async (phone) => {
+  const response = await axiosClient.post("/accounts/request-otp/", { phone });
+  return getData(response);
+};
 
-  let results = [...mockTools.results];
+export const verifyOtp = async (phone, code) => {
+  const response = await axiosClient.post("/accounts/verify-otp/", {
+    phone,
+    code,
+    otp: code,
+  });
 
-  if (params.category_id) {
-    results = results.filter((t) => t.category.id === Number(params.category_id));
-  }
-  if (params.city_id) {
-    results = results.filter((t) => t.city.id === Number(params.city_id));
-  }
-  if (params.search) {
-    const q = params.search.trim().toLowerCase();
-    results = results.filter((t) => t.name.toLowerCase().includes(q));
-  }
-  if (params.only_available) {
-    results = results.filter((t) => t.is_available);
-  }
+  saveAuthTokens(response.data);
+  return response.data;
+};
 
-  switch (params.ordering) {
-    case "price_asc":
-      results.sort((a, b) => a.daily_price - b.daily_price);
-      break;
-    case "price_desc":
-      results.sort((a, b) => b.daily_price - a.daily_price);
-      break;
-    case "rating":
-      results.sort((a, b) => b.owner.rating - a.owner.rating);
-      break;
-    case "distance":
-      results.sort((a, b) => a.distance_km - b.distance_km);
-      break;
-    default:
-      break; // جدیدترین: همون ترتیب پیش‌فرض mock
-  }
+export const refreshToken = async () => {
+  const refresh = localStorage.getItem("refresh_token");
+  const response = await axiosClient.post("/accounts/refresh/", { refresh });
 
-  // اضافه کردن کوردینیت موقت برای نقشه (توضیح بالا)
-  results = results.map((t) => ({ ...t, coordinates: deriveCoordinates(t) }));
+  saveAuthTokens(response.data);
+  return response.data;
+};
 
-  return {
-    count: results.length,
-    next: null,
-    previous: null,
-    results,
-  };
-}
+export const logout = () => {
+  localStorage.removeItem("access_token");
+  localStorage.removeItem("refresh_token");
+};
 
-/**
- * GET /api/tools/<id>/
- * @param {number} id
- */
-export async function fetchToolDetail(id) {
-  await delay();
-  if (Number(id) !== mockToolDetail.data.id) {
-    throw new ApiError("not_found", "مورد مورد نظر یافت نشد.");
-  }
-  return mockToolDetail.data;
-}
+export const getUserProfile = async () => {
+  const response = await axiosClient.get("/accounts/me/");
+  return getData(response);
+};
 
-/**
- * GET /api/tools/<id>/availability/?month=YYYY-MM
- * @param {number} id
- * @param {string} month
- */
-export async function fetchToolAvailability(id, month) {
-  await delay(250);
-  return mockAvailability.data;
-}
+export const updateUserProfile = async (profileData) => {
+  const response = await axiosClient.patch("/accounts/me/", profileData);
+  return getData(response);
+};
 
-/** GET /api/categories/ */
-export async function fetchCategories() {
-  await delay(200);
-  return mockCategories;
-}
+export const registerUser = async (payload) => {
+  const response = await axiosClient.post("/accounts/register/", payload);
+  saveAuthTokens(response.data);
+  return response.data;
+};
 
-/** GET /api/cities/ */
-export async function fetchCities() {
-  await delay(200);
-  return mockCities;
-}
+export const loginWithPassword = async (payload) => {
+  const response = await axiosClient.post("/accounts/login/", payload);
+  saveAuthTokens(response.data);
+  return response.data;
+};
 
-/**
- * GET /api/tools/<id>/reviews/
- * @param {number} id
- */
-export async function fetchToolReviews(id) {
-  await delay(300);
-  return mockToolReviews.data;
-}
+export const fetchTools = async (params = {}) => {
+  const response = await axiosClient.get("/tools/", {
+    params: removeEmptyParams(params),
+  });
+  return getData(response);
+};
 
-/**
- * GET /api/tools/<id>/related/
- * @param {number} id
- */
-export async function fetchRelatedTools(id) {
-  await delay(300);
-  return mockRelatedTools.data;
-}
+export const fetchToolDetail = async (id) => {
+  const response = await axiosClient.get(`/tools/${id}/`);
+  return getData(response);
+};
 
-/**
- * POST /api/auth/request-otp/
- * در محیط توسعه واقعی، کد OTP در ترمینال بک‌اند چاپ می‌شه (طبق README).
- * اینجا هم همون رفتار رو با کنسول مرورگر شبیه‌سازی می‌کنیم.
- */
-export async function requestOtp(phone) {
-  await delay(500);
-  if (!/^9\d{9}$/.test(phone)) {
-    throw new ApiError("bad_request", "شماره موبایل معتبر نیست.");
-  }
-  const fakeCode = "7283"; // ⚠️ موقتی — تا وقتی auth واقعی وصل شه همین کد رو هرجا قبول می‌کنیم
-  console.log(`[mock OTP] کد ارسال‌شده به 0${phone}: ${fakeCode}`);
-  return { status: "success" };
-}
+export const fetchToolAvailability = async (id, month) => {
+  const response = await axiosClient.get(`/tools/${id}/availability/`, {
+    params: removeEmptyParams({ month }),
+  });
+  return getData(response);
+};
 
-/**
- * POST /api/auth/verify-otp/
- * فعلاً هر کد ۴ رقمی رو قبول می‌کند، به‌جز "0000" که عمداً برای تست
- * state خطا رد می‌شود.
- */
-export async function verifyOtp(phone, code) {
-  await delay(500);
-  if (code === "0000") {
-    throw new ApiError("bad_request", "کد وارد شده صحیح نیست");
-  }
-  if (code.length !== 4) {
-    throw new ApiError("bad_request", "کد تأیید باید ۴ رقم باشد.");
-  }
-  return {
-    access_token: "mock-access-token",
-    refresh_token: "mock-refresh-token",
-    user: { id: 101, phone, full_name: "علی رضایی" },
-  };
-}
+export const fetchCategories = async () => {
+  const response = await axiosClient.get("/categories/");
+  return getData(response);
+};
 
-/**
- * GET /api/rentals/my/?status=...
- * @param {string|null} statusFilter - یکی از RENTAL_STATUS_LABELS یا null برای همه
- */
-export async function fetchMyRentals(statusFilter = null) {
-  await delay(350);
-  let results = [...mockMyRentals.data];
-  if (statusFilter) {
-    results = results.filter((r) => r.status === statusFilter);
-  }
-  return results;
-}
+export const fetchCities = async () => {
+  const response = await axiosClient.get("/cities/");
+  return getData(response);
+};
 
-/**
- * GET /api/rentals/my-tools/?status=...
- * @param {string|null} statusFilter
- */
-export async function fetchMyToolRentals(statusFilter = null) {
-  await delay(350);
-  let results = [...mockMyToolRentals.data];
-  if (statusFilter) {
-    results = results.filter((r) => r.status === statusFilter);
-  }
-  return results;
-}
+export const fetchToolReviews = async (id) => {
+  const response = await axiosClient.get(`/tools/${id}/reviews/`);
+  return getData(response);
+};
 
-/** GET /api/chat/conversations/ */
-export async function fetchConversations() {
-  await delay(300);
-  return mockConversations.data;
-}
+export const fetchRelatedTools = async (id) => {
+  const response = await axiosClient.get(`/tools/${id}/related/`);
+  return getData(response);
+};
 
-/**
- * GET /api/chat/conversations/<id>/messages/
- * ⚠️ موقتی: mock فقط برای گفتگوی id=1 پیام واقعی دارد (همان دیتاست کامل
- * نمونه با انواع پیام). برای بقیه‌ی گفتگوها یک پیام عمومی برگردانده می‌شود
- * تا UI نشکند، چون mock فعلی محتوای کامل برای همه‌ی گفتگوها ندارد.
- */
-export async function fetchConversationMessages(conversationId) {
-  await delay(300);
-  if (Number(conversationId) === 1) {
-    return mockConversationMessages.data;
-  }
-  return { rental_context: null, messages: [] };
-}
+export const fetchToolConditions = async () => {
+  const response = await axiosClient.get("/tools/conditions/");
+  return getData(response);
+};
 
-/** GET /api/reviews/tags/ */
-export async function fetchReviewTags() {
-  await delay(200);
-  return mockReviewTags;
-}
+export const createTool = async (payload) => {
+  const response = await axiosClient.post("/tools/", payload);
+  return getData(response);
+};
 
-/**
- * POST /api/rentals/<rental_id>/review/
- * @param {number} rentalId
- * @param {Object} payload - { overall_rating, criteria, tags, comment, photos, is_public }
- */
-export async function submitReview(rentalId, payload) {
-  await delay(500);
-  console.log(`[mock] ثبت نظر برای رزرو ${rentalId}:`, payload);
-  return { status: "success" };
-}
+export const updateTool = async (id, payload) => {
+  const response = await axiosClient.patch(`/tools/${id}/`, payload);
+  return getData(response);
+};
 
-/** GET /api/tools/conditions/ (یا یک enum ثابت سمت فرانت) */
-export async function fetchToolConditions() {
-  await delay(150);
-  return TOOL_CONDITIONS;
-}
+export const deleteTool = async (id) => {
+  const response = await axiosClient.delete(`/tools/${id}/`);
+  return getData(response);
+};
 
-/**
- * POST /api/tools/
- * @param {Object} payload - { category_id, name, brand, model, description,
- *   condition, specs, images, delivery_options, daily_price, deposit_amount,
- *   city_id, address }
- */
-export async function createTool(payload) {
-  await delay(600);
-  console.log("[mock] ثبت ابزار جدید:", payload);
-  return { status: "success", data: { id: Math.floor(Math.random() * 1000) + 100 } };
-}
+export const fetchMyRentals = async (statusFilter) => {
+  const response = await axiosClient.get("/rentals/my/", {
+    params: removeEmptyParams({ status: statusFilter }),
+  });
+  return getData(response);
+};
 
-/**
- * GET /api/admin/dashboard/
- * ⚠️ این endpoint فقط برای نقش ادمین معنا دارد. در نبود سیستم نقش
- * واقعی (mockCurrentUser فعلی هیچ role ندارد)، این تابع بدون احراز
- * هویت همیشه پاسخ می‌دهد — وقتی نقش/مجوز ادمین در بک‌اند پیاده شد،
- * این تابع باید 403 برای کاربر غیرادمین برگرداند.
- */
-export async function fetchAdminDashboard() {
-  await delay(350);
-  return {
-    kpis: mockAdminKpis,
-    rental_trend: mockRentalTrend,
-    pending_approvals: mockPendingApprovals,
-  };
-}
+export const fetchMyToolRentals = async (statusFilter) => {
+  const response = await axiosClient.get("/rentals/my-tools/", {
+    params: removeEmptyParams({ status: statusFilter }),
+  });
+  return getData(response);
+};
 
-/**
- * GET /api/admin/tools/?status=...
- * ⚠️ این آرایه‌ی mock به‌صورت محلی (در حافظه) mutate می‌شود تا
- * تأیید/رد/حذف در طول یک session رفتار واقعی داشته باشد. با رفرش
- * صفحه به حالت اولیه برمی‌گردد چون پایداری واقعی نداریم.
- */
-export async function fetchAdminToolsQueue(statusFilter = null) {
-  await delay(300);
-  if (!statusFilter || statusFilter === "all") return [...mockAdminToolsQueue];
-  return mockAdminToolsQueue.filter((t) => t.review_status === statusFilter);
-}
+export const createRental = async (payload) => {
+  const response = await axiosClient.post("/rentals/", payload);
+  return getData(response);
+};
 
-/** POST /api/admin/tools/<id>/approve/ */
-export async function approveAdminTool(toolId) {
-  await delay(300);
-  const tool = mockAdminToolsQueue.find((t) => t.id === toolId);
-  if (tool) tool.review_status = "approved";
-  return { status: "success" };
-}
+export const fetchRentalDetail = async (id) => {
+  const response = await axiosClient.get(`/rentals/${id}/`);
+  return getData(response);
+};
 
-/** POST /api/admin/tools/<id>/reject/ */
-export async function rejectAdminTool(toolId, reason) {
-  await delay(300);
-  const tool = mockAdminToolsQueue.find((t) => t.id === toolId);
-  if (tool) {
-    tool.review_status = "rejected";
-    tool.rejection_reason = reason;
-  }
-  return { status: "success" };
-}
+export const updateRental = async (id, payload) => {
+  const response = await axiosClient.patch(`/rentals/${id}/`, payload);
+  return getData(response);
+};
 
-/** DELETE /api/admin/tools/<id>/ */
-export async function deleteAdminTool(toolId) {
-  await delay(300);
-  const idx = mockAdminToolsQueue.findIndex((t) => t.id === toolId);
-  if (idx !== -1) mockAdminToolsQueue.splice(idx, 1);
-  return { status: "success" };
-}
+export const submitReview = async (rentalId, payload) => {
+  const response = await axiosClient.post(`/rentals/${rentalId}/review/`, payload);
+  return getData(response);
+};
 
-/** کلاس خطای یکپارچه برای تشخیص نوع خطا در UI (مطابق mockErrors در mockData.js) */
-export class ApiError extends Error {
-  constructor(type, message) {
-    super(message);
-    this.type = type;
-  }
-}
+export const fetchReviewTags = async () => {
+  const response = await axiosClient.get("/reviews/tags/");
+  return getData(response);
+};
+
+export const fetchConversations = async () => {
+  const response = await axiosClient.get("/chat/conversations/");
+  return getData(response);
+};
+
+export const fetchConversationMessages = async (conversationId) => {
+  const response = await axiosClient.get(`/chat/conversations/${conversationId}/messages/`);
+  return getData(response);
+};
+
+export const sendConversationMessage = async (conversationId, payload) => {
+  const response = await axiosClient.post(`/chat/conversations/${conversationId}/messages/`, payload);
+  return getData(response);
+};
+
+export const fetchAdminDashboard = async () => {
+  const response = await axiosClient.get("/admin/dashboard/");
+  return getData(response);
+};
+
+export const fetchAdminToolsQueue = async (statusFilter) => {
+  const response = await axiosClient.get("/admin/tools/", {
+    params: removeEmptyParams({ status: statusFilter }),
+  });
+  return getData(response);
+};
+
+export const approveAdminTool = async (toolId) => {
+  const response = await axiosClient.post(`/admin/tools/${toolId}/approve/`);
+  return getData(response);
+};
+
+export const rejectAdminTool = async (toolId, reason) => {
+  const response = await axiosClient.post(`/admin/tools/${toolId}/reject/`, { reason });
+  return getData(response);
+};
+
+export const deleteAdminTool = async (toolId) => {
+  const response = await axiosClient.delete(`/admin/tools/${toolId}/`);
+  return getData(response);
+};
+
+export default {
+  requestOtp,
+  verifyOtp,
+  refreshToken,
+  logout,
+  getUserProfile,
+  updateUserProfile,
+  registerUser,
+  loginWithPassword,
+  fetchTools,
+  fetchToolDetail,
+  fetchToolAvailability,
+  fetchCategories,
+  fetchCities,
+  fetchToolReviews,
+  fetchRelatedTools,
+  fetchToolConditions,
+  createTool,
+  updateTool,
+  deleteTool,
+  fetchMyRentals,
+  fetchMyToolRentals,
+  createRental,
+  fetchRentalDetail,
+  updateRental,
+  submitReview,
+  fetchReviewTags,
+  fetchConversations,
+  fetchConversationMessages,
+  sendConversationMessage,
+  fetchAdminDashboard,
+  fetchAdminToolsQueue,
+  approveAdminTool,
+  rejectAdminTool,
+  deleteAdminTool,
+};
