@@ -9,23 +9,27 @@ import ReviewFormPage from "./pages/ReviewFormPage";
 import ToolFormPage from "./pages/ToolFormPage";
 import AdminDashboardPage from "./pages/AdminDashboardPage";
 import AdminToolsPage from "./pages/AdminToolsPage";
+import CompleteProfilePage from "./pages/CompleteProfilePage";
+import ProtectedRoute from "./components/auth/ProtectedRoute";
 
 function App() {
   return (
     <BrowserRouter>
       <Routes>
         <Route path="/" element={<HomePage />} />
-        <Route path="/tools/new" element={<ToolFormPage />} />
         <Route path="/tools/:id" element={<ToolDetailPage />} />
         <Route path="/auth" element={<AuthPage />} />
-        <Route path="/checkout/:id" element={<CheckoutPage />} />
-        <Route path="/my-rentals" element={<MyRentalsPage />} />
-        <Route path="/chat" element={<ChatPage />} />
-        <Route path="/rentals/:rentalId/review" element={<ReviewFormPage />} />
-        <Route path="/admin" element={<AdminDashboardPage />} />
-        <Route path="/admin/tools" element={<AdminToolsPage />} />
-        {/* صفحات بعدی تیم اینجا اضافه می‌شن، مثلاً: */}
-        {/* <Route path="/my-tools" element={<MyToolsPage />} /> */}
+
+        <Route element={<ProtectedRoute />}>
+          <Route path="/complete-profile" element={<CompleteProfilePage />} />
+          <Route path="/tools/new" element={<ToolFormPage />} />
+          <Route path="/checkout/:id" element={<CheckoutPage />} />
+          <Route path="/my-rentals" element={<MyRentalsPage />} />
+          <Route path="/chat" element={<ChatPage />} />
+          <Route path="/rentals/:rentalId/review" element={<ReviewFormPage />} />
+          <Route path="/admin" element={<AdminDashboardPage />} />
+          <Route path="/admin/tools" element={<AdminToolsPage />} />
+        </Route>
       </Routes>
     </BrowserRouter>
   );
