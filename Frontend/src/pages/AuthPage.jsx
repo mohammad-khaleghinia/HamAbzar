@@ -1,69 +1,78 @@
+import { useEffect } from "react";
+import { useNavigate } from "react-router-dom";
 import { useAuthFlow } from "../hooks/useAuthFlow";
 import BrandPanel from "../components/auth/BrandPanel";
 import PhoneStep from "../components/auth/PhoneStep";
 import OtpStep from "../components/auth/OtpStep";
-import RegisterStep from "../components/auth/RegisterStep";
 import SuccessStep from "../components/auth/SuccessStep";
+import { getUserProfile } from "../services/api";
 
-export default function AuthPage() {
-  const {
-    step,
-    phone,
-    setPhone,
-    otpDigits,
-    setOtpDigits,
-    secondsLeft,
-    isSubmitting,
-    errorMessage,
-    submitPhone,
-    submitOtp,
-    submitRegister,
-    resendOtp,
-    goBackToPhone,
-  } = useAuthFlow();
+const isProfileComplete = (profile) => {
+  return Boolean(
+    profile?.first_name?.trim() &&
+      profile?.last_name?.trim() &&
+      profile?.national_code?.trim()
+  );
+};
+
+const AuthPage = () => {
+  const navigate = useNavigate();
+  const { step, verifyPhone, verifyOtp } = useAuthFlow();
+
+  const redirectAfterLogin = async () => {
+    try {
+      const profile = await getUserProfile();
+
+      if (isProfileComplete(profile)) {
+        navigate("/", { replace: true });
+      } else {
+        navigate("/complete-profile", { replace: true });
+      }
+    } catch (error) {
+      navigate("/complete-profile", { replace: true });
+    }
+  };
+
+  useEffect(() => {
+    const isAuthenticated = localStorage.getItem("access_token");
+
+    if (isAuthenticated) {
+      redirectAfterLogin();
+    }
+  }, []);
+
+  useEffect(() => {
+    if (step === "success") {
+      redirectAfterLogin();
+    }
+  }, [step]);
+
+  let CurrentStepComponent;
+
+  switch (step) {
+    case "phone":
+      CurrentStepComponent = <PhoneStep onSubmit={verifyPhone} />;
+      break;
+    case "otp":
+      CurrentStepComponent = <OtpStep onSubmit={verifyOtp} />;
+      break;
+    case "success":
+      CurrentStepComponent = <SuccessStep />;
+      break;
+    default:
+      CurrentStepComponent = <PhoneStep onSubmit={verifyPhone} />;
+  }
 
   return (
-    <div dir="rtl" className="flex min-h-screen font-sans">
+    <div className="flex min-h-screen bg-gray-50">
       <BrandPanel />
-
       <div className="flex flex-1 items-center justify-center p-6">
-        <div className="w-full max-w-[380px]">
-          {step === "phone" && (
-            <PhoneStep
-              phone={phone}
-              onPhoneChange={setPhone}
-              onSubmit={submitPhone}
-              isSubmitting={isSubmitting}
-              errorMessage={errorMessage}
-            />
-          )}
-
-          {step === "otp" && (
-            <OtpStep
-              phone={phone}
-              otpDigits={otpDigits}
-              onOtpChange={setOtpDigits}
-              onSubmit={submitOtp}
-              onBack={goBackToPhone}
-              onResend={resendOtp}
-              secondsLeft={secondsLeft}
-              isSubmitting={isSubmitting}
-              errorMessage={errorMessage}
-            />
-          )}
-
-          {step === "register" && (
-            <RegisterStep
-              phone={phone}
-              onSubmit={submitRegister}
-              isSubmitting={isSubmitting}
-              errorMessage={errorMessage}
-            />
-          )}
-
-          {step === "success" && <SuccessStep />}
+        <div className="w-full max-w-md space-y-6 rounded-lg bg-white p-8 shadow-md">
+          {CurrentStepComponent}
         </div>
       </div>
     </div>
   );
-}
+};
+
+export default AuthPage;
